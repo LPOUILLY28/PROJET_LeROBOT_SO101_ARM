@@ -4,6 +4,10 @@
 
 This repository restructures the work carried out on the [SO-101](https://github.com/TheRobotStudio/SO-ARM100) robotic arm during the Hugging Face × AMD Robotics Hackathon 2025 and the follow-up project at Arts et Métiers (ENSAM). It brings five independent workstreams together under a single, reproducible structure, all built on top of the [LeRobot](https://github.com/huggingface/lerobot) ecosystem.
 
+<p align="center">
+  <img src="docs/img/overview.png" alt="SO-101 experimental setup" width="600">
+</p>
+
 ---
 
 ## Overview
@@ -106,12 +110,25 @@ lerobot-record \
 
 ### Digital twin (`sim/`)
 
+The MuJoCo scene contains the arm, a blue cube (free joint, physics active) and a bin. The physical leader drives the virtual follower in real time.
+
+<p align="center">
+  <img src="docs/img/sim_mujoco.png" alt="MuJoCo pick-and-place scene" width="500">
+</p>
+
 ```bash
 python sim/teleop_mujoco.py            # drive the virtual follower with the real leader
 python sim/act_mujoco.py               # run a trained ACT policy in simulation
 ```
 
 ### Adaptive-grip RL (`rl_grip/`)
+
+A piezoelectric sensor on the gripper feeds tactile features (peak voltage, gradient) to a Q-learning agent that learns the right closing force per object.
+
+<p align="center">
+  <img src="docs/img/piezo_setup.png" alt="Arduino + piezo sensor setup" width="420">
+  <img src="docs/img/piezo_closeup.png" alt="Piezo sensor mounted on the gripper" width="420">
+</p>
 
 Flash the Arduino sketch first, then:
 
@@ -123,6 +140,14 @@ python rl_grip/grip_rl_so101.py                # real session (200 trials, 4 obj
 See [`rl_grip/README.md`](rl_grip/README.md) for the full wiring and session protocol.
 
 ### Vision (`vision/`)
+
+Intrinsic calibration with a chessboard, hand-eye calibration, then HSV detection that outputs the object position in centimeters in the robot frame.
+
+<p align="center">
+  <img src="docs/img/vision_calibration.png" alt="Camera calibration with chessboard" width="320">
+  <img src="docs/img/vision_mask.png" alt="HSV mask on dark background" width="320">
+  <img src="docs/img/vision_result.png" alt="Detected object, position in cm" width="320">
+</p>
 
 Run the scripts in order:
 
@@ -155,7 +180,7 @@ python vision/5_pipeline.py       # detect → inverse kinematics → grasp
 
 ## Credits
 
-SO-101 project — Hugging Face × AMD Robotics Hackathon 2025 and Arts et Métiers (ENSAM).
-Team: Anis Turki, Léo Pouilly, Stanislas Henon, Martin Saulnier, August Vanier, Alexandre Jeanne.
+SO-101 scholar project — Arts et Métiers (ENSAM).
+Team (until May 2026): Anis Turki, Léo Pouilly, Stanislas Henon, Martin Saulnier, August Vanier, Alexandre Jeanne.
 
 Built on [LeRobot](https://github.com/huggingface/lerobot) by Hugging Face.
