@@ -1,18 +1,17 @@
 """
-teleop_mujoco.py — version basse latence
 ════════════════════════════════════════════════════════════
-Téleopération temps réel : Leader physique SO101 → MuJoCo
+Real-time teleoperation: physical SO101 leader → MuJoCo
 
-Optimisations :
-  • sync_read     : lecture groupée des 6 servos en 1 paquet (~3-5× plus rapide)
-  • thread reader : la lecture USB ne bloque jamais le viewer
-  • filtre léger  : ALPHA réduit pour moins d'inertie
+Optimizations:
+  • sync_read      : reads the 6 servos in a single batch (~3-5x faster)
+  • reader thread   : USB reads never block the viewer
+  • light filtering : reduced ALPHA for less inertia
 
-Usage :
-  python teleop_mujoco.py                    # auto-détection
+Usage:
+  python teleop_mujoco.py                    # auto-detect
   python teleop_mujoco.py --port /dev/ttyACM1
-  python teleop_mujoco.py --scene chemin.xml
-  python teleop_mujoco.py --simulate         # sans leader
+  python teleop_mujoco.py --scene path.xml
+  python teleop_mujoco.py --simulate         # without a leader
 ════════════════════════════════════════════════════════════
 """
 from __future__ import annotations
@@ -26,20 +25,20 @@ import numpy as np
 import mujoco
 import mujoco.viewer
 
-# ─── Configuration ────────────────────────────────────────────────────────────
+# Configs
+BASE_DIR = Path(__file__).resolve().parent
 SCENE_CANDIDATES = [
-    Path("/home/leo28/SO-ARM100/Simulation/SO101/scene_pick_place.xml"),
-    Path.home() / "SO-ARM100/Simulation/SO101/scene_pick_place.xml",
+    BASE_DIR / "scene_pick_place.xml",
     Path.cwd() / "scene_pick_place.xml",
 ]
-SCENE_FALLBACK = Path("/home/leo28/SO-ARM100/Simulation/SO101/scene.xml")
+SCENE_FALLBACK = BASE_DIR / "scene.xml"
 
 LEADER_PORT = "/dev/ttyACM2"
-CALIB_PATH  = Path("/home/leo28/.cache/huggingface/lerobot/calibration/teleoperators/so101_leader/my_leader_arm.json")
+CALIB_PATH  = Path.home() / ".cache/huggingface/lerobot/calibration/teleoperators/so101_leader/my_leader_arm.json"
 
-FREQ_HZ      = 100        # viewer plus réactif
+FREQ_HZ      = 100        # more responsive viewer
 DT           = 1.0 / FREQ_HZ
-ALPHA_FILTER = 0.15       # moins d'inertie
+ALPHA_FILTER = 0.15       # less inertia
 
 JOINT_NAMES = [
     "shoulder_pan", "shoulder_lift", "elbow_flex",
@@ -47,7 +46,7 @@ JOINT_NAMES = [
 ]
 
 
-# ─── MuJoCo ───────────────────────────────────────────────────────────────────
+# Mujoco
 def load_mujoco(scene_path):
     model = mujoco.MjModel.from_xml_path(str(scene_path))
     data  = mujoco.MjData(model)
@@ -64,8 +63,8 @@ def set_joint_positions(model, data, actions):
             data.ctrl[aid] = actions[i]
 
 
-# ─── LeRobot ──────────────────────────────────────────────────────────────────
-def _charger_lerobot():
+# LeRobot
+def _load_lerobot():
     try:
         import serial.tools.list_ports
         from lerobot.motors.feetech.feetech import FeetechMotorsBus
@@ -75,27 +74,27 @@ def _charger_lerobot():
                   for i, name in enumerate(JOINT_NAMES)}
         return serial, FeetechMotorsBus, motors, MotorCalibration, True
     except ImportError as e:
-        print(f"[WARN] LeRobot non disponible : {e}")
+        print(f"[WARN] LeRobot not available: {e}")
         return None, None, None, None, False
 
 
-def detecter_port_leader(serial_module, preferer=LEADER_PORT):
+def detect_leader_port(serial_module, preferred=LEADER_PORT):
     ports = list(serial_module.tools.list_ports.comports())
     devices = [p.device for p in ports]
-    if preferer and preferer in devices:
-        print(f"[Leader] Port préféré trouvé : {preferer}")
-        return preferer
+    if preferred and preferred in devices:
+        print(f"[Leader] Preferred port found: {preferred}")
+        return preferred
     for p in ports:
         if "ttyACM" in p.device or "ttyUSB" in p.device:
-            print(f"[Leader] Port détecté : {p.device}")
+            print(f"[Leader] Port detected: {p.device}")
             return p.device
     return None
 
 
-# ─── Bras leader avec thread reader ──────────────────────────────────────────
+# Leader arm with reader thread
 class LeaderArm:
     def __init__(self, port, simulate=False):
-        serial_mod, FeetechMotorsBus, motors, MotorCalibration, lerobot_ok = _charger_lerobot()
+        serial_mod, FeetechMotorsBus, motors, MotorCalibration, lerobot_ok = _load_lerobot()
 
         self.simulate = simulate or not lerobot_ok or port is None
         self._bus = None
@@ -107,7 +106,7 @@ class LeaderArm:
         self._warned = False
 
         if self.simulate:
-            print("[Leader] Mode STATIQUE — pas de leader, bras au repos.")
+            print("[Leader] STATIC mode — no leader, arm at rest.")
             return
 
         try:
@@ -130,28 +129,28 @@ class LeaderArm:
                 self._bus.calibration = calib
                 if hasattr(self._bus, "write_calibration"):
                     self._bus.write_calibration(calib)
-                print(f"[Leader] Calibration chargée et écrite ({CALIB_PATH.name})")
+                print(f"[Leader] Calibration loaded and written ({CALIB_PATH.name})")
             else:
-                print(f"[WARN] Calibration introuvable : {CALIB_PATH}")
+                print(f"[WARN] Calibration not found: {CALIB_PATH}")
 
             try:
                 self._bus.disable_torque()
-                print("[Leader] Torque désactivé.")
+                print("[Leader] Torque disabled.")
             except Exception as e:
-                print(f"[Leader] (info) disable_torque indisponible : {e}")
+                print(f"[Leader] (info) disable_torque unavailable: {e}")
 
             self._use_sync_read = hasattr(self._bus, "sync_read")
-            mode = "sync_read (groupé)" if self._use_sync_read else "read séquentiel"
-            print(f"[Leader] Mode lecture : {mode}")
+            mode = "sync_read (batched)" if self._use_sync_read else "sequential read"
+            print(f"[Leader] Read mode: {mode}")
 
-            print(f"[Leader] Connecté sur {port}")
-            print("[Leader] Bouge le bras — le jumeau MuJoCo va suivre !\n")
+            print(f"[Leader] Connected on {port}")
+            print("[Leader] Move the arm — the MuJoCo twin will follow!\n")
 
             self._thread = threading.Thread(target=self._reader_loop, daemon=True)
             self._thread.start()
 
         except Exception as e:
-            print(f"[Leader] Erreur connexion : {e}")
+            print(f"[Leader] Connection error: {e}")
             self.simulate = True
             self._bus = None
 
@@ -167,7 +166,7 @@ class LeaderArm:
             return np.deg2rad(angles_deg)
         except Exception as e:
             if not self._warned:
-                print(f"[Leader] Erreur lecture : {e}")
+                print(f"[Leader] Read error: {e}")
                 self._warned = True
             return None
 
@@ -183,54 +182,54 @@ class LeaderArm:
                 with self._lock:
                     self._last = filt
 
-    def lire_positions_rad(self):
+    def read_positions_rad(self):
         with self._lock:
             return self._last.copy()
 
-    def deconnecter(self):
+    def disconnect(self):
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=1.0)
         if self._bus is not None:
             try:
                 self._bus.disconnect()
-                print("[Leader] Déconnecté.")
+                print("[Leader] Disconnected.")
             except Exception:
                 pass
 
 
-# ─── Boucle principale ────────────────────────────────────────────────────────
+# Main loop
 def run(scene_path, leader):
-    print(f"[MuJoCo] Chargement de la scène : {scene_path}")
+    print(f"[MuJoCo] Loading scene: {scene_path}")
     model, data = load_mujoco(scene_path)
-    print(f"[MuJoCo] Modèle : {model.nq} DDL, {model.nu} actuateurs\n")
+    print(f"[MuJoCo] Model: {model.nq} DOF, {model.nu} actuators\n")
 
-    for nom in JOINT_NAMES:
-        aid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, nom)
-        status = "✓" if aid >= 0 else "✗ INTROUVABLE"
-        print(f"  Actuateur '{nom}' → id={aid}  {status}")
+    for name in JOINT_NAMES:
+        aid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
+        status = "✓" if aid >= 0 else "✗ NOT FOUND"
+        print(f"  Actuator '{name}' → id={aid}  {status}")
     print()
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         while viewer.is_running():
             t0 = time.monotonic()
-            set_joint_positions(model, data, leader.lire_positions_rad())
+            set_joint_positions(model, data, leader.read_positions_rad())
             mujoco.mj_step(model, data)
             viewer.sync()
             time.sleep(max(0.0, DT - (time.monotonic() - t0)))
 
 
-# ─── Point d'entrée ───────────────────────────────────────────────────────────
-def trouver_scene(scene_arg):
+# Entry point
+def find_scene(scene_arg):
     if scene_arg:
         p = Path(scene_arg).expanduser()
         return p if p.exists() else None
     for p in SCENE_CANDIDATES:
         if p.exists():
-            print(f"[Scene] Trouvée : {p}")
+            print(f"[Scene] Found: {p}")
             return p
     if SCENE_FALLBACK.exists():
-        print(f"[WARN] scene_pick_place.xml introuvable → fallback scene.xml")
+        print(f"[WARN] scene_pick_place.xml not found → falling back to scene.xml")
         return SCENE_FALLBACK
     return None
 
@@ -238,24 +237,24 @@ def trouver_scene(scene_arg):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", default=None)
-    parser.add_argument("--scene", default=None, help="Chemin vers un .xml MuJoCo")
+    parser.add_argument("--scene", default=None, help="Path to a MuJoCo .xml file")
     parser.add_argument("--simulate", action="store_true")
     args = parser.parse_args()
 
-    scene_path = trouver_scene(args.scene)
+    scene_path = find_scene(args.scene)
     if scene_path is None:
-        print("[ERREUR] Aucune scène MuJoCo trouvée.")
+        print("[ERROR] No MuJoCo scene found.")
         return
 
     port = None
     if not args.simulate:
-        serial_mod, _, _, _, lerobot_ok = _charger_lerobot()
+        serial_mod, _, _, _, lerobot_ok = _load_lerobot()
         if lerobot_ok:
-            port = args.port or detecter_port_leader(serial_mod)
+            port = args.port or detect_leader_port(serial_mod)
         if port is None:
-            print("[WARN] Leader non trouvé.")
-            rep = input("  Continuer en mode statique ? [o/n] : ").strip().lower()
-            if rep != "o":
+            print("[WARN] Leader not found.")
+            rep = input("  Continue in static mode? [y/n]: ").strip().lower()
+            if rep != "y":
                 return
             args.simulate = True
 
@@ -263,10 +262,10 @@ def main():
     try:
         run(scene_path, leader)
     except KeyboardInterrupt:
-        print("\n[Info] Arrêt demandé.")
+        print("\n[Info] Stop requested.")
     finally:
-        leader.deconnecter()
-        print("Terminé.")
+        leader.disconnect()
+        print("Done.")
 
 
 if __name__ == "__main__":

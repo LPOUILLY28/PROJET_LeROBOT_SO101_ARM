@@ -1,5 +1,5 @@
 """
-Script de simulation de la policy ACT dans MuJoCo pour le SO101.
+ACT policy simulation script in MuJoCo for the SO101.
 """
 
 import time
@@ -9,9 +9,10 @@ import mujoco.viewer
 from pathlib import Path
 import torch
 
-# ─── Configuration ────────────────────────────────────────────────────────────
-SCENE_PATH  = Path("/home/leo28/SO-ARM100/Simulation/SO101/scene.xml")
-MODEL_PATH  = Path("/home/leo28/models/act_so101")
+# config
+BASE_DIR    = Path(__file__).resolve().parent
+SCENE_PATH  = BASE_DIR / "scene.xml"
+MODEL_PATH  = Path("/home/leo28/models/act_so101")  # trained ACT checkpoint, not versioned in this repo
 DEVICE      = "cpu"
 N_STEPS     = 1000
 DT          = 0.02  # 50 Hz
@@ -28,7 +29,7 @@ JOINT_NAMES = [
 CAM_WIDTH  = 640
 CAM_HEIGHT = 480
 
-# ─── MuJoCo ──────────────────────────────────────────────────────────────────
+# Mujoco
 def load_mujoco(scene_path):
     model = mujoco.MjModel.from_xml_path(str(scene_path))
     data  = mujoco.MjData(model)
@@ -54,16 +55,16 @@ def render_camera(model, data, renderer):
     renderer.update_scene(data)
     return renderer.render()
 
-# ─── Policy ACT ───────────────────────────────────────────────────────────────
+# ACT policy
 def load_policy(model_path, device="cpu"):
     from lerobot.policies.act.modeling_act import ACTPolicy
-    print(f"Chargement policy ACT depuis {model_path}...")
+    print(f"Loading ACT policy from {model_path}...")
     policy = ACTPolicy.from_pretrained(str(model_path))
     policy = policy.to(device)
     policy.eval()
     if hasattr(policy.config, 'temporal_ensemble_coeff'):
         policy.config.temporal_ensemble_coeff = None
-    print("Policy ACT chargée !")
+    print("ACT policy loaded!")
     return policy
 
 def prepare_observation(joint_positions, image_rgb, device="cpu"):
@@ -82,22 +83,22 @@ def prepare_observation(joint_positions, image_rgb, device="cpu"):
     }
 
 def predict_chunk(policy, model_mj, data, renderer, device="cpu"):
-    """Prédit un chunk complet via predict_action_chunk."""
+    """Predict a full chunk via predict_action_chunk."""
     joint_pos = get_joint_positions(model_mj, data)
     image     = render_camera(model_mj, data, renderer)
     obs       = prepare_observation(joint_pos, image, device=device)
 
     with torch.no_grad():
-        # predict_action_chunk retourne (1, chunk_size, n_joints)
+        # predict_action_chunk returns (1, chunk_size, n_joints)
         actions = policy.predict_action_chunk(obs)
 
     actions = actions.squeeze(0).cpu().numpy()  # (chunk_size, n_joints)
     return actions
-
-# ─── Boucle principale ────────────────────────────────────────────────────────
 def run_simulation(policy, model, data, renderer, n_steps=N_STEPS, dt=DT):
-    print(f"\nSimulation lancée — {n_steps} steps à {1/dt:.0f} Hz")
-    print("Ferme la fenêtre MuJoCo pour arrêter.\n")
+
+# Main loop
+    print(f"\nSimulation started — {n_steps} steps at {1/dt:.0f} Hz")
+    print("Close the MuJoCo window to stop.\n")
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         step         = 0
@@ -116,7 +117,7 @@ def run_simulation(policy, model, data, renderer, n_steps=N_STEPS, dt=DT):
                     chunk_count += 1
                     print(f"Chunk {chunk_count:3d} | {len(action_queue)} actions | range [{chunk.min():.3f}, {chunk.max():.3f}]")
                 except Exception as e:
-                    print(f"Erreur prédiction : {e}")
+                    print(f"Prediction error: {e}")
                     action_queue = [np.zeros(len(JOINT_NAMES))]
 
             action = action_queue.pop(0)
@@ -128,14 +129,14 @@ def run_simulation(policy, model, data, renderer, n_steps=N_STEPS, dt=DT):
             step += 1
             time.sleep(dt)
 
-        print(f"\nSimulation terminée — {step} steps, {chunk_count} chunks prédits.")
+        print(f"\nSimulation finished — {step} steps, {chunk_count} chunks predicted.")
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# Main
 def main():
-    print("=== Simulation ACT sur SO101 dans MuJoCo ===\n")
+    print("=== ACT simulation on SO101 in MuJoCo ===\n")
 
     model, data = load_mujoco(SCENE_PATH)
-    print(f"Scène chargée : {model.nq} DDL, {model.nu} actuateurs")
+    print(f"Scene loaded: {model.nq} DOF, {model.nu} actuators")
 
     renderer = mujoco.Renderer(model, height=CAM_HEIGHT, width=CAM_WIDTH)
     policy   = load_policy(MODEL_PATH, device=DEVICE)
