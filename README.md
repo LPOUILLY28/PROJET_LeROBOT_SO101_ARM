@@ -180,8 +180,7 @@ python vision/5_pipeline.py       # detect → inverse kinematics → grasp
 
 ## Credits
 
-SO-101 scholar project — Arts et Métiers (ENSAM).
+Personal project on my own SO-101 arm, initiated and led by Léo Pouilly, developed with 5 Arts et Métiers classmates (team of 6).
 Team (until May 2026): Anis Turki, Léo Pouilly, Stanislas Henon, Martin Saulnier, August Vanier, Alexandre Jeanne.
-Project initiated and led by Léo Pouilly on his personal SO-101 arm (team of 6).
 
 Built on [LeRobot](https://github.com/huggingface/lerobot) by Hugging Face.
